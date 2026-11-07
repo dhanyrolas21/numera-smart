@@ -4,20 +4,42 @@ namespace App\Http\Controllers;
 
 use App\Models\Question;
 use App\Models\StudentAttempt;
+use App\Services\DiagnosticService;
 use Illuminate\Http\Request;
 
 class AssessmentController extends Controller
 {
-    public function start(Request $request)
+    public function pilihKelas()
     {
+        return view('asesmen.pilih-kelas');
+    }
+
+    public function mulai(Request $request)
+    {
+        $data = $request->validate([
+            'tingkat' => ['required', 'in:4,5,6'],
+        ]);
+        $tingkat = (int) $data['tingkat'];
         $user = $request->user();
 
+        // Lanjutkan percobaan yang belum selesai di kelas yang sama, kalau ada.
         $attempt = StudentAttempt::where('user_id', $user->id)
-            ->where('status', 'in_progress')->latest()->first()
-            ?? StudentAttempt::create([
+            ->where('status', 'in_progress')
+            ->whereHas('question', fn ($q) => $q->where('tingkat', $tingkat))
+            ->latest()
+            ->first();
+
+        if (! $attempt) {
+            $soal = Question::where('tingkat', $tingkat)
+                ->where('dunia', 'operasi_hitung')
+                ->inRandomOrder()
+                ->firstOrFail();
+
+            $attempt = StudentAttempt::create([
                 'user_id' => $user->id,
-                'question_id' => Question::where('dunia', 'operasi_hitung')->firstOrFail()->id,
+                'question_id' => $soal->id,
             ]);
+        }
 
         return redirect()->route('asesmen.soal', $attempt);
     }
@@ -48,8 +70,11 @@ class AssessmentController extends Controller
     {
         $this->milikSiswa($request, $attempt);
         $attempt->load('question', 'log');
+        if (! $attempt->log) {
+            return redirect()->route('asesmen.soal', $attempt);
+        }
 
-        $hasil = app(\App\Services\DiagnosticService::class)
+        $hasil = app(DiagnosticService::class)
             ->analisis($attempt->question, $attempt->log->selected_option);
 
         $attempt->log->update([
@@ -69,7 +94,7 @@ class AssessmentController extends Controller
         }
 
         $hasil = json_decode($attempt->log->ai_detected_misconception ?? '', true)
-            ?: app(\App\Services\DiagnosticService::class)->analisis($attempt->question, $attempt->log->selected_option);
+            ?: app(DiagnosticService::class)->analisis($attempt->question, $attempt->log->selected_option);
 
         $attempt->update(['current_step' => max($attempt->current_step, 3)]);
 
@@ -84,7 +109,7 @@ class AssessmentController extends Controller
             return redirect()->route('asesmen.soal', $attempt);
         }
 
-        $soal = app(\App\Services\DiagnosticService::class)->verifikasi($attempt->question);
+        $soal = app(DiagnosticService::class)->verifikasi($attempt->question);
         $tersimpan = json_decode($attempt->log->verification_answer ?? '', true)['jawaban'] ?? [];
         $attempt->update(['current_step' => max($attempt->current_step, 4)]);
 
@@ -97,7 +122,7 @@ class AssessmentController extends Controller
         $attempt->load('question', 'log');
         abort_unless($attempt->log, 404);
 
-        $soal = app(\App\Services\DiagnosticService::class)->verifikasi($attempt->question);
+        $soal = app(DiagnosticService::class)->verifikasi($attempt->question);
 
         $rules = [];
         foreach (array_keys($soal) as $i) {
@@ -121,8 +146,37 @@ class AssessmentController extends Controller
     public function remediasi(Request $request, StudentAttempt $attempt)
     {
         $this->milikSiswa($request, $attempt);
+        $attempt->load('question', 'log');
+        abort_unless($attempt->log, 404);
 
-        return view('asesmen.remediasi', compact('attempt'));
+        $tepat = json_decode($attempt->log->verification_answer ?? '', true)['tepat'] ?? [];
+        $fokus = [
+            'operasi' => ($tepat[0] ?? true) === false,
+            'angka' => ($tepat[1] ?? true) === false,
+        ];
+        $hasil = json_decode($attempt->log->ai_detected_misconception ?? '', true) ?: [];
+        $attempt->update(['current_step' => max($attempt->current_step, 5)]);
+
+        return view('asesmen.remediasi', compact('attempt', 'fokus', 'hasil'));
+    }
+
+    public function remediasiSelesai(Request $request, StudentAttempt $attempt)
+    {
+        $this->milikSiswa($request, $attempt);
+        $attempt->load('log');
+        abort_unless($attempt->log, 404);
+
+        $attempt->log->update(['remediation_status' => 'selesai']);
+        $attempt->update(['current_step' => max($attempt->current_step, 6)]);
+
+        return redirect()->route('asesmen.uji', $attempt);
+    }
+
+    public function uji(Request $request, StudentAttempt $attempt)
+    {
+        $this->milikSiswa($request, $attempt);
+
+        return view('asesmen.uji', compact('attempt'));
     }
 
     private function milikSiswa(Request $request, StudentAttempt $attempt): void

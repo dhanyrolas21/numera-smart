@@ -9,7 +9,10 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
-    return view('dashboard');
+    // Siswa langsung diarahkan ke pemilihan kelas.
+    return auth()->user()->isSiswa()
+        ? redirect()->route('asesmen.start')
+        : view('dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
@@ -19,7 +22,9 @@ Route::middleware('auth')->group(function () {
 });
 
 Route::middleware(['auth', 'role:siswa'])->prefix('asesmen')->name('asesmen.')->group(function () {
-    Route::get('/', [AssessmentController::class, 'start'])->name('start');
+    Route::get('/', [AssessmentController::class, 'pilihKelas'])->name('start');
+    Route::post('/mulai', [AssessmentController::class, 'mulai'])->name('mulai');
+
     Route::get('/{attempt}/soal', [AssessmentController::class, 'soal'])->name('soal');
     Route::post('/{attempt}/soal', [AssessmentController::class, 'jawab'])->name('jawab');
     Route::get('/{attempt}/analisis', [AssessmentController::class, 'analisis'])->name('analisis');
@@ -27,6 +32,8 @@ Route::middleware(['auth', 'role:siswa'])->prefix('asesmen')->name('asesmen.')->
     Route::get('/{attempt}/verifikasi', [AssessmentController::class, 'verifikasi'])->name('verifikasi');
     Route::post('/{attempt}/verifikasi', [AssessmentController::class, 'verifikasiSimpan'])->name('verifikasi.simpan');
     Route::get('/{attempt}/remediasi', [AssessmentController::class, 'remediasi'])->name('remediasi');
+    Route::post('/{attempt}/remediasi', [AssessmentController::class, 'remediasiSelesai'])->name('remediasi.selesai');
+    Route::get('/{attempt}/uji', [AssessmentController::class, 'uji'])->name('uji');
 });
 
 require __DIR__.'/auth.php';
