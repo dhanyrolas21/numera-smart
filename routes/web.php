@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AssessmentController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\TeacherController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -9,10 +10,7 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
-    // Siswa langsung diarahkan ke pemilihan kelas.
-    return auth()->user()->isSiswa()
-        ? redirect()->route('asesmen.start')
-        : view('dashboard');
+    return redirect()->route(auth()->user()->isGuru() ? 'guru.index' : 'asesmen.start');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
@@ -34,6 +32,13 @@ Route::middleware(['auth', 'role:siswa'])->prefix('asesmen')->name('asesmen.')->
     Route::get('/{attempt}/remediasi', [AssessmentController::class, 'remediasi'])->name('remediasi');
     Route::post('/{attempt}/remediasi', [AssessmentController::class, 'remediasiSelesai'])->name('remediasi.selesai');
     Route::get('/{attempt}/uji', [AssessmentController::class, 'uji'])->name('uji');
+    Route::post('/{attempt}/uji', [AssessmentController::class, 'ujiSimpan'])->name('uji.simpan');
+});
+
+Route::middleware(['auth', 'role:guru'])->prefix('guru')->name('guru.')->group(function () {
+    Route::get('/', [TeacherController::class, 'index'])->name('index');
+    Route::get('/{attempt}', [TeacherController::class, 'show'])->name('show');
+    Route::post('/{attempt}/setujui', [TeacherController::class, 'setujui'])->name('setujui');
 });
 
 require __DIR__.'/auth.php';

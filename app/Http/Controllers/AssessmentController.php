@@ -31,6 +31,7 @@ class AssessmentController extends Controller
 
         if (! $attempt) {
             $soal = Question::where('tingkat', $tingkat)
+                ->where('jenis', 'diagnostik')
                 ->where('dunia', 'operasi_hitung')
                 ->inRandomOrder()
                 ->firstOrFail();
@@ -175,8 +176,57 @@ class AssessmentController extends Controller
     public function uji(Request $request, StudentAttempt $attempt)
     {
         $this->milikSiswa($request, $attempt);
+        $attempt->load('question', 'log');
+        abort_unless($attempt->log, 404);
 
-        return view('asesmen.uji', compact('attempt'));
+        $soalUji = $this->soalUji($attempt);
+        $jawaban = json_decode($attempt->log->uji_answers ?? '', true) ?: [];
+        $indeks = count($jawaban);
+        $total = $soalUji->count();
+
+        // Semua soal uji sudah dijawab.
+        if ($indeks >= $total) {
+            return view('asesmen.uji-selesai', compact('attempt'));
+        }
+
+        $soal = $soalUji[$indeks];
+
+        return view('asesmen.uji', compact('attempt', 'soal', 'indeks', 'total'));
+    }
+
+    public function ujiSimpan(Request $request, StudentAttempt $attempt)
+    {
+        $this->milikSiswa($request, $attempt);
+        $attempt->load('question', 'log');
+        abort_unless($attempt->log, 404);
+
+        $soalUji = $this->soalUji($attempt);
+        $jawaban = json_decode($attempt->log->uji_answers ?? '', true) ?: [];
+        $indeks = count($jawaban);
+        abort_if($indeks >= $soalUji->count(), 404);
+
+        $soal = $soalUji[$indeks];
+        $data = $request->validate([
+            'selected_option' => ['required', 'in:' . implode(',', array_keys($soal->options))],
+        ]);
+
+        $jawaban[(string) $soal->id] = $data['selected_option'];
+        $attempt->log->update(['uji_answers' => json_encode($jawaban)]);
+
+        // Setelah soal terakhir dikirim, percobaan menunggu tinjauan guru.
+        if (count($jawaban) >= $soalUji->count()) {
+            $attempt->update(['status' => 'waiting_review', 'current_step' => 6]);
+        }
+
+        return redirect()->route('asesmen.uji', $attempt);
+    }
+
+    private function soalUji(StudentAttempt $attempt)
+    {
+        return Question::where('jenis', 'uji')
+            ->where('tingkat', $attempt->question->tingkat)
+            ->orderBy('id')
+            ->get();
     }
 
     private function milikSiswa(Request $request, StudentAttempt $attempt): void
